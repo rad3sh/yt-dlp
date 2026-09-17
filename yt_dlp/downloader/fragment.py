@@ -109,7 +109,8 @@ class FragmentFD(FileDownloader):
             frag_index_stream.close()
 
     def _download_fragment(self, ctx, frag_url, info_dict, headers=None, request_data=None):
-        fragment_filename = '%s-Frag%d' % (ctx['tmpfilename'], ctx['fragment_index'])
+        fragment_filename = '%s-Frag%d' % (
+            ctx.get('fragment_tmpfilename', ctx['tmpfilename']), ctx['fragment_index'])
         fragment_info_dict = {
             'url': frag_url,
             'http_headers': headers or info_dict.get('http_headers'),
@@ -121,7 +122,12 @@ class FragmentFD(FileDownloader):
             frag_resume_len = self.filesize_or_none(self.temp_name(fragment_filename))
         fragment_info_dict['frag_resume_len'] = ctx['frag_resume_len'] = frag_resume_len
 
-        success, _ = ctx['dl'].download(fragment_filename, fragment_info_dict)
+        try:
+            success, _ = ctx['dl'].download(fragment_filename, fragment_info_dict)
+        except KeyboardInterrupt:
+            if ctx.get('streaming_only'):
+                self.try_remove(self.temp_name(fragment_filename))
+            raise
         if not success:
             return False
         if fragment_info_dict.get('filetime'):
@@ -172,7 +178,13 @@ class FragmentFD(FileDownloader):
             'max_sleep_interval': 0,
             'sleep_interval_subtitles': 0,
         })
-        tmpfilename = self.temp_name(ctx['filename'])
+        if ctx.get('streaming_only'):
+            streaming_temp_dir = ctx['streaming_temp_dir']
+            os.makedirs(streaming_temp_dir, exist_ok=True)
+            tmpfilename = os.path.join(
+                streaming_temp_dir, f'stream-{ctx["streaming_stream_index"]}')
+        else:
+            tmpfilename = self.temp_name(ctx['filename'])
         open_mode = 'wb'
 
         # Establish possible resume length
@@ -212,12 +224,22 @@ class FragmentFD(FileDownloader):
                 self._write_ytdl_file(ctx)
                 assert ctx['fragment_index'] == 0
 
-        dest_stream, tmpfilename = self.sanitize_open(tmpfilename, open_mode)
+        if ctx.get('streaming_only'):
+            # The streaming output callback owns the actual output files. Do
+            # not create a second growing media file just to satisfy the
+            # ordinary fragment downloader pipeline.
+            fragment_tmpfilename = tmpfilename
+            dest_stream = open(os.devnull, 'wb')
+            tmpfilename = os.devnull
+        else:
+            fragment_tmpfilename = tmpfilename
+            dest_stream, tmpfilename = self.sanitize_open(tmpfilename, open_mode)
 
         ctx.update({
             'dl': dl,
             'dest_stream': dest_stream,
             'tmpfilename': tmpfilename,
+            'fragment_tmpfilename': fragment_tmpfilename,
             # Total complete fragments downloaded so far in bytes
             'complete_frags_downloaded_bytes': resume_len,
         })
@@ -287,6 +309,19 @@ class FragmentFD(FileDownloader):
         if self.__do_ytdl_file(ctx):
             self.try_remove(self.ytdl_filename(ctx['filename']))
         elapsed = time.time() - ctx['started']
+
+        if ctx.get('streaming_only'):
+            self._hook_progress({
+                'downloaded_bytes': ctx['complete_frags_downloaded_bytes'],
+                'total_bytes': ctx['complete_frags_downloaded_bytes'],
+                'filename': ctx['filename'],
+                'status': 'finished',
+                'elapsed': elapsed,
+                'ctx_id': ctx.get('ctx_id'),
+                'max_progress': ctx.get('max_progress'),
+                'progress_idx': ctx.get('progress_idx'),
+            }, info_dict)
+            return True
 
         to_file = ctx['tmpfilename'] != '-'
         if to_file:

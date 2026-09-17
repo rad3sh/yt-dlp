@@ -1,3 +1,4 @@
+import os
 import time
 import urllib.parse
 
@@ -34,6 +35,7 @@ class DashSegmentsFD(FragmentFD):
                 streaming_output = AutoOutput(output_path, 'dash', logger=self.ydl)
             else:
                 streaming_output = AutoOutput(output_path, 'auto', logger=self.ydl)
+            streaming_temp_dir = os.path.join(output_path, '.fragments')
 
         if 'http_dash_segments_generator' in info_dict['protocol'].split('+'):
             real_downloader = None  # No external FD can support --live-from-start
@@ -64,6 +66,8 @@ class DashSegmentsFD(FragmentFD):
             }
             ctx['streaming_output'] = streaming_output
             ctx['streaming_stream_index'] = len(args)
+            ctx['streaming_only'] = bool(streaming_output)
+            ctx['streaming_temp_dir'] = streaming_temp_dir
 
             if real_downloader:
                 self._prepare_external_frag_download(ctx)

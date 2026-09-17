@@ -3477,6 +3477,7 @@ class YoutubeDL:
                     return file
 
                 fd, success = None, True
+                streaming_only = False
                 if info_dict.get('protocol') or info_dict.get('url'):
                     fd = get_suitable_downloader(info_dict, self.params, to_stdout=temp_filename == '-')
                     if fd != FFmpegFD and 'no-direct-merge' not in self.params['compat_opts'] and (
@@ -3583,7 +3584,9 @@ class YoutubeDL:
                     if dl_filename is None or dl_filename == temp_filename:
                         # dl_filename == temp_filename could mean that the file was partially downloaded with --no-part.
                         # So we should try to resume the download
-                        success, real_download = self.dl(temp_filename, info_dict)
+                        streaming_only = self.params.get('streaming_output_format') and fd and fd.FD_NAME == 'dashsegments'
+                        success, real_download = self.dl(
+                            os.devnull if streaming_only else temp_filename, info_dict)
                         info_dict['__real_download'] = real_download
                     else:
                         self.report_file_already_downloaded(dl_filename)
@@ -3660,11 +3663,12 @@ class YoutubeDL:
                     ffmpeg_fixup(downloader == 'web_socket_fragment', 'Malformed duration detected', FFmpegFixupDurationPP)
 
                 fixup()
-                try:
-                    replace_info_dict(self.post_process(dl_filename, info_dict, files_to_move))
-                except PostProcessingError as err:
-                    self.report_error(f'Postprocessing: {err}')
-                    return
+                if not streaming_only:
+                    try:
+                        replace_info_dict(self.post_process(dl_filename, info_dict, files_to_move))
+                    except PostProcessingError as err:
+                        self.report_error(f'Postprocessing: {err}')
+                        return
                 try:
                     for ph in self._post_hooks:
                         ph(info_dict['filepath'])

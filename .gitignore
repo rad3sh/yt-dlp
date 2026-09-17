@@ -5,6 +5,7 @@ cookies
 .netrc
 
 # Downloaded
+experiments/
 *.annotations.xml
 *.aria2
 *.description
