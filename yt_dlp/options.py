@@ -517,6 +517,14 @@ def create_parser():
         action='store_false', dest='live_from_start',
         help='Download livestreams from the current time (default)')
     general.add_option(
+        '--streaming-output-format',
+        dest='streaming_output_format', metavar='FORMAT', choices=('auto', 'dash', 'hls'), default=None,
+        help='Write downloaded fragments as a progressive streaming output (choices: auto, dash, hls; default: auto when --streaming-output-path is used)')
+    general.add_option(
+        '--streaming-output-path',
+        dest='streaming_output_path', metavar='DIRECTORY', default=None,
+        help='Directory for --streaming-output-format (supports output template fields)')
+    general.add_option(
         '--wait-for-video',
         dest='wait_for_video', metavar='MIN[-MAX]', default=None,
         help=(

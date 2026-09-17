@@ -922,6 +922,8 @@ def parse_options(argv=None):
         'encoding': opts.encoding,
         'extract_flat': opts.extract_flat,
         'live_from_start': opts.live_from_start,
+        'streaming_output_format': opts.streaming_output_format,
+        'streaming_output_path': opts.streaming_output_path,
         'wait_for_video': opts.wait_for_video,
         'mark_watched': opts.mark_watched,
         'merge_output_format': opts.merge_output_format,

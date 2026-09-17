@@ -1,6 +1,9 @@
 import time
 import urllib.parse
 
+from .streaming.dash import DashOutput
+from .streaming.hls import HlsOutput
+from .streaming.auto import AutoOutput
 from . import get_suitable_downloader
 from .fragment import FragmentFD
 from ..utils import ReExtractInfo, update_url_query, urljoin
@@ -15,6 +18,23 @@ class DashSegmentsFD(FragmentFD):
     FD_NAME = 'dashsegments'
 
     def real_download(self, filename, info_dict):
+        streaming_output = None
+        streaming_output_format = self.params.get('streaming_output_format')
+        if streaming_output_format:
+            if not self.params.get('streaming_output_path'):
+                self.report_error('--streaming-output-path is required with --streaming-output-format')
+                return False
+            if self.params.get('concurrent_fragment_downloads', 1) != 1:
+                self.report_error('--streaming-output-format currently requires --concurrent-fragments 1')
+                return False
+            output_path = self.ydl.evaluate_outtmpl(self.params['streaming_output_path'], info_dict)
+            if streaming_output_format == 'hls':
+                streaming_output = HlsOutput(output_path, logger=self.ydl)
+            elif streaming_output_format == 'dash':
+                streaming_output = AutoOutput(output_path, 'dash', logger=self.ydl)
+            else:
+                streaming_output = AutoOutput(output_path, 'auto', logger=self.ydl)
+
         if 'http_dash_segments_generator' in info_dict['protocol'].split('+'):
             real_downloader = None  # No external FD can support --live-from-start
         else:
@@ -42,6 +62,8 @@ class DashSegmentsFD(FragmentFD):
                 'live': 'is_from_start' if fmt.get('is_from_start') else fmt.get('is_live'),
                 'total_frags': fragment_count,
             }
+            ctx['streaming_output'] = streaming_output
+            ctx['streaming_stream_index'] = len(args)
 
             if real_downloader:
                 self._prepare_external_frag_download(ctx)
@@ -65,7 +87,13 @@ class DashSegmentsFD(FragmentFD):
 
             args.append([ctx, fragments_to_download, fmt])
 
-        return self.download_and_append_fragments_multiple(*args, is_fatal=lambda idx: idx == 0)
+        try:
+            return self.download_and_append_fragments_multiple(
+                *args, is_fatal=lambda idx: idx == 0,
+                fragment_callback=(streaming_output.write_fragment if streaming_output else None))
+        finally:
+            if streaming_output:
+                streaming_output.finalize()
 
     def _resolve_fragments(self, fragments, ctx):
         fragments = fragments(ctx) if callable(fragments) else fragments
@@ -92,4 +120,8 @@ class DashSegmentsFD(FragmentFD):
                 'fragment_count': fragment.get('fragment_count'),
                 'index': i,
                 'url': fragment_url,
+                '_streaming_stream_index': ctx.get('streaming_stream_index'),
+                '_streaming_info': fmt,
+                'duration': fragment.get('duration'),
+                'is_init_segment': fragment.get('is_init_segment', False),
             }

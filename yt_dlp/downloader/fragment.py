@@ -373,6 +373,7 @@ class FragmentFD(FileDownloader):
         max_progress = len(args)
         if max_progress == 1:
             return self.download_and_append_fragments(*args[0], **kwargs)
+        fragment_callback = kwargs.pop('fragment_callback', None)
         max_workers = self.params.get('concurrent_fragment_downloads', 1)
         if max_progress > 1:
             self._prepare_multiline_status(max_progress)
@@ -382,7 +383,8 @@ class FragmentFD(FileDownloader):
             ctx['max_progress'] = max_progress
             ctx['progress_idx'] = idx
             return self.download_and_append_fragments(
-                ctx, fragments, info_dict, **kwargs, tpe=tpe, interrupt_trigger=interrupt_trigger)
+                ctx, fragments, info_dict, **kwargs, fragment_callback=fragment_callback,
+                tpe=tpe, interrupt_trigger=interrupt_trigger)
 
         class FTPE(concurrent.futures.ThreadPoolExecutor):
             # has to stop this or it's going to wait on the worker thread itself
@@ -430,7 +432,7 @@ class FragmentFD(FileDownloader):
 
     def download_and_append_fragments(
             self, ctx, fragments, info_dict, *, is_fatal=(lambda idx: False),
-            pack_func=(lambda content, idx: content), finish_func=None,
+            pack_func=(lambda content, idx: content), finish_func=None, fragment_callback=None,
             tpe=None, interrupt_trigger=(True, )):
 
         if not self.params.get('skip_unavailable_fragments', True):
@@ -469,8 +471,10 @@ class FragmentFD(FileDownloader):
                     if fatal:
                         raise
 
-        def append_fragment(frag_content, frag_index, ctx):
+        def append_fragment(fragment, frag_content, frag_index, ctx):
             if frag_content:
+                if fragment_callback:
+                    fragment_callback(fragment, frag_content)
                 self._append_fragment(ctx, pack_func(frag_content, frag_index))
             elif not is_fatal(frag_index - 1):
                 self.report_skip_fragment(frag_index, 'fragment not found')
@@ -497,7 +501,7 @@ class FragmentFD(FileDownloader):
                             'fragment_filename_sanitized': frag_filename,
                             'fragment_index': frag_index,
                         })
-                        if not append_fragment(decrypt_fragment(fragment, self._read_fragment(ctx)), frag_index, ctx):
+                        if not append_fragment(fragment, decrypt_fragment(fragment, self._read_fragment(ctx)), frag_index, ctx):
                             return False
                 except KeyboardInterrupt:
                     self._finish_multiline_status()
@@ -512,7 +516,7 @@ class FragmentFD(FileDownloader):
                 try:
                     download_fragment(fragment, ctx)
                     result = append_fragment(
-                        decrypt_fragment(fragment, self._read_fragment(ctx)), fragment['frag_index'], ctx)
+                        fragment, decrypt_fragment(fragment, self._read_fragment(ctx)), fragment['frag_index'], ctx)
                 except KeyboardInterrupt:
                     if info_dict.get('is_live'):
                         break
