@@ -20,6 +20,7 @@ class DashSegmentsFD(FragmentFD):
 
     def real_download(self, filename, info_dict):
         streaming_output = None
+        streaming_temp_dir = None
         streaming_output_format = self.params.get('streaming_output_format')
         if streaming_output_format:
             if not self.params.get('streaming_output_path'):
