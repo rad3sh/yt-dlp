@@ -3480,6 +3480,9 @@ class YoutubeDL:
                 streaming_only = False
                 if info_dict.get('protocol') or info_dict.get('url'):
                     fd = get_suitable_downloader(info_dict, self.params, to_stdout=temp_filename == '-')
+                    streaming_only = bool(
+                        self.params.get('streaming_output_format')
+                        and fd and fd.FD_NAME == 'dashsegments')
                     if fd != FFmpegFD and 'no-direct-merge' not in self.params['compat_opts'] and (
                             info_dict.get('section_start') or info_dict.get('section_end')):
                         msg = ('This format cannot be partially downloaded' if FFmpegFD.available()
@@ -3524,14 +3527,15 @@ class YoutubeDL:
                     if dl_filename is not None:
                         self.report_file_already_downloaded(dl_filename)
                     elif fd:
-                        if fd != FFmpegFD and temp_filename != '-':
+                        if fd != FFmpegFD and temp_filename != '-' and not streaming_only:
                             for f in info_dict['requested_formats']:
                                 f['filepath'] = fname = prepend_extension(
                                     correct_ext(temp_filename, info_dict['ext']),
                                     'f{}'.format(f['format_id']), info_dict['ext'])
                                 downloaded.append(fname)
                         info_dict['url'] = '\n'.join(f['url'] for f in info_dict['requested_formats'])
-                        success, real_download = self.dl(temp_filename, info_dict)
+                        success, real_download = self.dl(
+                            os.devnull if streaming_only else temp_filename, info_dict)
                         info_dict['__real_download'] = real_download
                     else:
                         if self.params.get('allow_unplayable_formats'):
@@ -3570,6 +3574,8 @@ class YoutubeDL:
                             info_dict['__real_download'] = info_dict['__real_download'] or real_download
                             success = success and partial_success
 
+                    if streaming_only:
+                        downloaded = []
                     if downloaded and merger.available and not self.params.get('allow_unplayable_formats'):
                         info_dict['__postprocessors'].append(merger)
                         info_dict['__files_to_merge'] = downloaded

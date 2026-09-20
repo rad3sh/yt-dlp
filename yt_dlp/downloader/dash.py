@@ -127,6 +127,9 @@ class DashSegmentsFD(FragmentFD):
                 'url': fragment_url,
                 '_streaming_stream_index': ctx.get('streaming_stream_index'),
                 '_streaming_info': fmt,
-                'duration': fragment.get('duration'),
+                # YouTube's live DASH fragment generator does not include a
+                # duration on each fragment. The format's target duration is
+                # the best available timing metadata for this case.
+                'duration': fragment.get('duration') or fmt.get('target_duration'),
                 'is_init_segment': fragment.get('is_init_segment', False),
             }
