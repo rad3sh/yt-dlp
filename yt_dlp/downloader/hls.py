@@ -6,6 +6,8 @@ import urllib.parse
 from . import get_suitable_downloader
 from .external import FFmpegFD
 from .fragment import FragmentFD
+from .streaming.hls import HlsOutput
+from .streaming.hls import HlsOutput
 from .. import webvtt
 from ..dependencies import Cryptodome
 from ..utils import (
@@ -72,6 +74,17 @@ class HlsFD(FragmentFD):
         return all(check_results())
 
     def real_download(self, filename, info_dict):
+        streaming_output = None
+        if self.params.get('streaming_output_format'):
+            if not self.params.get('streaming_output_path'):
+                self.report_error('--streaming-output-path is required with --streaming-output-format')
+                return False
+            if self.params.get('concurrent_fragment_downloads', 1) != 1:
+                self.report_error('--streaming-output-format currently requires --concurrent-fragments 1')
+                return False
+            output_path = self.ydl.evaluate_outtmpl(self.params['streaming_output_path'], info_dict)
+            streaming_output = HlsOutput(output_path, logger=self.ydl)
+
         man_url = info_dict['url']
 
         s = info_dict.get('hls_media_playlist_data')
@@ -92,6 +105,20 @@ class HlsFD(FragmentFD):
             s = s_bytes.decode('utf-8', 'ignore')
 
         can_download, message = self.can_download(s, info_dict, self.params.get('allow_unplayable_formats')), None
+        streaming_output = None
+        if self.params.get('streaming_output_format'):
+            if not self.params.get('streaming_output_path'):
+                self.report_error('--streaming-output-path is required with --streaming-output-format')
+                return False
+            if self.params.get('concurrent_fragment_downloads', 1) != 1:
+                self.report_error('--streaming-output-format currently requires --concurrent-fragments 1')
+                return False
+            if self.params['streaming_output_format'] not in ('auto', 'hls'):
+                self.report_error('DASH output for HLS input requires the FFmpeg transmuxing backend')
+                return False
+            output_path = self.ydl.evaluate_outtmpl(self.params['streaming_output_path'], info_dict)
+            streaming_output = HlsOutput(output_path, logger=self.ydl)
+            can_download = True
         if can_download:
             has_ffmpeg = FFmpegFD.available()
             if not Cryptodome.AES and '#EXT-X-KEY:METHOD=AES-128' in s:
@@ -111,7 +138,10 @@ class HlsFD(FragmentFD):
                 install_ffmpeg = '' if has_ffmpeg else 'install ffmpeg and '
                 message = ('Live HLS streams are not supported by the native downloader. If this is a livestream, '
                            f'please {install_ffmpeg}add "--downloader ffmpeg --hls-use-mpegts" to your command')
-        if not can_download:
+        if not can_download and not streaming_output:
+            if streaming_output:
+                self.report_error('HLS streaming output is unavailable for this playlist')
+                return False
             if self._has_drm(s) and not self.params.get('allow_unplayable_formats'):
                 if info_dict.get('has_drm') and self.params.get('test'):
                     self.to_screen(f'[{self.FD_NAME}] This format is DRM protected', skip_eol=True)
@@ -171,6 +201,16 @@ class HlsFD(FragmentFD):
             'total_frags': media_frags,
             'ad_frags': ad_frags,
         }
+        if streaming_output:
+            ctx.update({
+                'streaming_only': True,
+                'streaming_stream_index': 0,
+                'streaming_temp_dir': f'{streaming_output.directory}/.fragments',
+            })
+        ctx['streaming_only'] = bool(streaming_output)
+        ctx['streaming_stream_index'] = 0
+        ctx['streaming_temp_dir'] = self.ydl.evaluate_outtmpl(
+            self.params['streaming_output_path'], info_dict) + '/.fragments' if streaming_output else None
 
         if real_downloader:
             self._prepare_external_frag_download(ctx)
@@ -201,6 +241,7 @@ class HlsFD(FragmentFD):
         discontinuity_count = 0
         frag_index = 0
         ad_frag_next = False
+        pending_duration = None
         for line in s.splitlines():
             line = line.strip()
             if line:
@@ -222,7 +263,9 @@ class HlsFD(FragmentFD):
                         'decrypt_info': decrypt_info,
                         'byte_range': byte_range,
                         'media_sequence': media_sequence,
+                        'duration': pending_duration,
                     })
+                    pending_duration = None
                     media_sequence += 1
 
                     # If the byte_range is truthy, reset it after appending a fragment that uses it
@@ -259,6 +302,7 @@ class HlsFD(FragmentFD):
                         'decrypt_info': decrypt_info,
                         'byte_range': map_byte_range,
                         'media_sequence': media_sequence,
+                        'is_init_segment': True,
                     })
                     media_sequence += 1
 
@@ -280,6 +324,9 @@ class HlsFD(FragmentFD):
                                     decrypt_info['URI'], extra_key_query or extra_segment_query)
                             if decrypt_url != decrypt_info['URI']:
                                 decrypt_info['KEY'] = None
+
+                elif line.startswith('#EXTINF:'):
+                    pending_duration = float(line[8:].split(',', 1)[0])
 
                 elif line.startswith('#EXT-X-MEDIA-SEQUENCE'):
                     media_sequence = int(line[22:])
@@ -401,9 +448,24 @@ class HlsFD(FragmentFD):
                 return output.getvalue().encode()
 
             if len(fragments) == 1:
-                self.download_and_append_fragments(ctx, fragments, info_dict)
+                try:
+                    self.download_and_append_fragments(
+                        ctx, fragments, info_dict,
+                        fragment_callback=(streaming_output.write_fragment if streaming_output else None))
+                finally:
+                    if streaming_output:
+                        streaming_output.finalize()
             else:
                 self.download_and_append_fragments(
-                    ctx, fragments, info_dict, pack_func=pack_fragment, finish_func=fin_fragments)
+                    ctx, fragments, info_dict, pack_func=pack_fragment, finish_func=fin_fragments,
+                    fragment_callback=(streaming_output.write_fragment if streaming_output else None))
+                if streaming_output:
+                    streaming_output.finalize()
         else:
-            return self.download_and_append_fragments(ctx, fragments, info_dict)
+            try:
+                return self.download_and_append_fragments(
+                    ctx, fragments, info_dict,
+                    fragment_callback=(streaming_output.write_fragment if streaming_output else None))
+            finally:
+                if streaming_output:
+                    streaming_output.finalize()

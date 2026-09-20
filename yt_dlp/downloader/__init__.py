@@ -109,6 +109,8 @@ def _get_suitable_downloader(info_dict, protocol, params, default):
 
     if protocol in ('m3u8', 'm3u8_native'):
         if info_dict.get('is_live'):
+            if params.get('streaming_output_format') in ('auto', 'hls'):
+                return HlsFD
             return FFmpegFD
         elif (external_downloader or '').lower() == 'native':
             return HlsFD
