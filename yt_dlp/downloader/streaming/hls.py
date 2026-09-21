@@ -6,10 +6,16 @@ from pathlib import Path
 class HlsOutput:
     """Write downloaded HLS media fragments and a progressively updated playlist."""
 
-    def __init__(self, directory, logger=None):
+    def __init__(self, directory, logger=None, stream_index=None, info_dict=None, master_state=None):
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
         self.logger = logger
+        self.stream_index = stream_index
+        self.info_dict = info_dict or {}
+        self.master_state = master_state
+        self.track_directory = self.directory / (
+            'audio' if stream_index == 1 else 'video') if stream_index is not None else self.directory
+        self.track_directory.mkdir(parents=True, exist_ok=True)
         self._segments = []
         self._init_name = None
         self._lock = threading.Lock()
@@ -18,13 +24,13 @@ class HlsOutput:
         with self._lock:
             if fragment.get('is_init_segment'):
                 self._init_name = 'init.mp4'
-                (self.directory / self._init_name).write_bytes(data)
+                (self.track_directory / self._init_name).write_bytes(data)
                 self._write_playlist()
                 return
             duration = fragment.get('duration') or 2.0
             number = len(self._segments) + 1
             name = f'segment-{number:05d}.ts'
-            (self.directory / name).write_bytes(data)
+            (self.track_directory / name).write_bytes(data)
             self._segments.append((name, float(duration)))
             self._write_playlist()
 
@@ -41,12 +47,47 @@ class HlsOutput:
             f'#EXT-X-TARGETDURATION:{int(target_duration + 0.999)}',
             '#EXT-X-MEDIA-SEQUENCE:0',
         ]
+        if self.info_dict.get('is_live'):
+            lines.append('#EXT-X-PLAYLIST-TYPE:EVENT')
         if self._init_name:
             lines.append(f'#EXT-X-MAP:URI="{self._init_name}"')
         for name, duration in self._segments:
             lines.extend((f'#EXTINF:{duration:.3f},', name))
         if endlist:
             lines.append('#EXT-X-ENDLIST')
-        temporary = self.directory / 'playlist.m3u8.tmp'
+        temporary = self.track_directory / 'playlist.m3u8.tmp'
         temporary.write_text('\n'.join(lines) + '\n', encoding='utf-8')
-        os.replace(temporary, self.directory / 'playlist.m3u8')
+        os.replace(temporary, self.track_directory / 'playlist.m3u8')
+        if self.stream_index is not None:
+            self._write_master()
+
+    def _write_master(self):
+        playlists = {
+            index: self.directory / name / 'playlist.m3u8'
+            for index, name in ((0, 'video'), (1, 'audio'))
+        }
+        if not any(path.exists() for path in playlists.values()):
+            return
+        lines = ['#EXTM3U', '#EXT-X-VERSION:3']
+        audio_playlist = playlists[1]
+        video_playlist = playlists[0]
+        if audio_playlist.exists():
+            lines.append('#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="default",DEFAULT=YES,AUTOSELECT=YES,URI="audio/playlist.m3u8"')
+        if video_playlist.exists():
+            info = self.info_dict
+            video_info = self.master_state.get('video', info) if self.master_state else info
+            audio_info = self.master_state.get('audio', {}) if self.master_state else {}
+            bandwidth = int(sum((x.get('tbr') or 0) * 1000 for x in (video_info, audio_info)) or 1000000)
+            codecs = ','.join(filter(None, (video_info.get('vcodec'), audio_info.get('acodec'))))
+            resolution = ''
+            if video_info.get('width') and video_info.get('height'):
+                resolution = f',RESOLUTION={video_info["width"]}x{video_info["height"]}'
+            frame_rate = f',FRAME-RATE={video_info["fps"]}' if video_info.get('fps') else ''
+            codec_attr = f',CODECS="{codecs}"' if codecs else ''
+            lines.extend((
+                f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth}{resolution}{frame_rate}{codec_attr}'
+                + (',AUDIO="audio"' if audio_playlist.exists() else ''),
+                'video/playlist.m3u8'))
+        temporary = self.directory / 'master.m3u8.tmp'
+        temporary.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+        os.replace(temporary, self.directory / 'master.m3u8')

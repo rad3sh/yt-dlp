@@ -74,17 +74,6 @@ class HlsFD(FragmentFD):
         return all(check_results())
 
     def real_download(self, filename, info_dict):
-        streaming_output = None
-        if self.params.get('streaming_output_format'):
-            if not self.params.get('streaming_output_path'):
-                self.report_error('--streaming-output-path is required with --streaming-output-format')
-                return False
-            if self.params.get('concurrent_fragment_downloads', 1) != 1:
-                self.report_error('--streaming-output-format currently requires --concurrent-fragments 1')
-                return False
-            output_path = self.ydl.evaluate_outtmpl(self.params['streaming_output_path'], info_dict)
-            streaming_output = HlsOutput(output_path, logger=self.ydl)
-
         man_url = info_dict['url']
 
         s = info_dict.get('hls_media_playlist_data')
@@ -117,7 +106,14 @@ class HlsFD(FragmentFD):
                 self.report_error('DASH output for HLS input requires the FFmpeg transmuxing backend')
                 return False
             output_path = self.ydl.evaluate_outtmpl(self.params['streaming_output_path'], info_dict)
-            streaming_output = HlsOutput(output_path, logger=self.ydl)
+            stream_index = 1 if info_dict.get('vcodec') == 'none' else 0
+            master_state = getattr(self.ydl, '_streaming_hls_state', None)
+            if master_state is None:
+                master_state = self.ydl._streaming_hls_state = {}
+            master_state['audio' if stream_index == 1 else 'video'] = info_dict
+            streaming_output = HlsOutput(
+                output_path, logger=self.ydl, stream_index=stream_index,
+                info_dict=info_dict, master_state=master_state)
             can_download = True
         if can_download:
             has_ffmpeg = FFmpegFD.available()

@@ -3482,7 +3482,7 @@ class YoutubeDL:
                     fd = get_suitable_downloader(info_dict, self.params, to_stdout=temp_filename == '-')
                     streaming_only = bool(
                         self.params.get('streaming_output_format')
-                        and fd and fd.FD_NAME == 'dashsegments')
+                        and fd and fd.FD_NAME in ('dashsegments', 'hlsnative'))
                     if fd != FFmpegFD and 'no-direct-merge' not in self.params['compat_opts'] and (
                             info_dict.get('section_start') or info_dict.get('section_end')):
                         msg = ('This format cannot be partially downloaded' if FFmpegFD.available()
@@ -3491,6 +3491,10 @@ class YoutubeDL:
                         return
 
                 if info_dict.get('requested_formats') is not None:
+                    streaming_only = bool(
+                        self.params.get('streaming_output_format')
+                        and all(f.get('protocol', '').split('+')[0] in ('m3u8', 'm3u8_native', 'http_dash_segments', 'http_dash_segments_generator')
+                                for f in info_dict['requested_formats']))
                     old_ext = info_dict['ext']
                     if self.params.get('merge_output_format') is None:
                         if (info_dict['ext'] == 'webm'
@@ -3590,7 +3594,9 @@ class YoutubeDL:
                     if dl_filename is None or dl_filename == temp_filename:
                         # dl_filename == temp_filename could mean that the file was partially downloaded with --no-part.
                         # So we should try to resume the download
-                        streaming_only = self.params.get('streaming_output_format') and fd and fd.FD_NAME == 'dashsegments'
+                        streaming_only = (
+                            self.params.get('streaming_output_format')
+                            and fd and fd.FD_NAME in ('dashsegments', 'hlsnative'))
                         success, real_download = self.dl(
                             os.devnull if streaming_only else temp_filename, info_dict)
                         info_dict['__real_download'] = real_download
