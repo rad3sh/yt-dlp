@@ -169,9 +169,11 @@ class FragmentFD(FileDownloader):
         else:
             total_frags_str = 'unknown (live)'
         self.to_screen(f'[{self.FD_NAME}] Total fragments: {total_frags_str}')
-        self.report_destination(ctx['filename'])
+        if not ctx.get('streaming_only'):
+            self.report_destination(ctx['filename'])
         dl = HttpQuietDownloader(self.ydl, {
             **self.params,
+            'streaming_only': ctx.get('streaming_only', False),
             'noprogress': True,
             'test': False,
             'sleep_interval': 0,

@@ -288,6 +288,8 @@ class FileDownloader:
 
     def report_destination(self, filename):
         """Report destination filename."""
+        if self.params.get('streaming_output_format') and self.params.get('streaming_only'):
+            return
         self.to_screen('[download] Destination: ' + filename)
 
     def _prepare_multiline_status(self, lines=1):
