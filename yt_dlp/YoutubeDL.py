@@ -3566,7 +3566,9 @@ class YoutubeDL:
                             new_info = dict(info_dict)
                             del new_info['requested_formats']
                             new_info.update(f)
-                            if temp_filename != '-':
+                            if streaming_only:
+                                fname = os.devnull
+                            elif temp_filename != '-':
                                 fname = prepend_extension(
                                     correct_ext(temp_filename, new_info['ext']),
                                     'f{}'.format(f['format_id']), new_info['ext'])

@@ -78,7 +78,13 @@ class HlsOutput:
             video_info = self.master_state.get('video', info) if self.master_state else info
             audio_info = self.master_state.get('audio', {}) if self.master_state else {}
             bandwidth = int(sum((x.get('tbr') or 0) * 1000 for x in (video_info, audio_info)) or 1000000)
-            codecs = ','.join(filter(None, (video_info.get('vcodec'), audio_info.get('acodec'))))
+            video_codec = codec_string(video_info.get('vcodec'))
+            audio_codec = codec_string(audio_info.get('acodec'))
+            if not audio_codec and audio_playlist.exists():
+                # Some HLS extractors leave acodec unset for an audio-only
+                # MP4/M4A rendition even though the manifest identifies it.
+                audio_codec = 'mp4a.40.2' if audio_info.get('ext') in ('mp4', 'm4a') else None
+            codecs = ','.join(filter(None, (video_codec, audio_codec)))
             resolution = ''
             if video_info.get('width') and video_info.get('height'):
                 resolution = f',RESOLUTION={video_info["width"]}x{video_info["height"]}'
@@ -91,3 +97,26 @@ class HlsOutput:
         temporary = self.directory / 'master.m3u8.tmp'
         temporary.write_text('\n'.join(lines) + '\n', encoding='utf-8')
         os.replace(temporary, self.directory / 'master.m3u8')
+
+
+def codec_string(codec):
+    """Normalize yt-dlp codec names for HLS CODECS attributes."""
+    if not codec or codec == 'none':
+        return None
+    if codec.startswith('avc1.') or codec.startswith('av01.') or codec.startswith('hev1.') or codec.startswith('hvc1.'):
+        return codec
+    if codec.startswith('avc'):
+        return 'avc1'
+    if codec.startswith('vp9'):
+        return 'vp09'
+    if codec.startswith('vp8'):
+        return 'vp08'
+    if codec.startswith('mp4a.') or codec.startswith('ac-3') or codec.startswith('ec-3'):
+        return codec
+    if codec.startswith('aac'):
+        return 'mp4a.40.2'
+    if codec.startswith('opus'):
+        return 'opus'
+    if codec.startswith('vorbis'):
+        return 'vorbis'
+    return codec
