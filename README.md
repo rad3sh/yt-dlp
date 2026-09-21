@@ -405,6 +405,14 @@ Tip: Use `CTRL`+`F` (or `Command`+`F`)  to search by keywords
                                     for YouTube, Twitch, TVer, and mellow-fan
     --no-live-from-start            Download livestreams from the current time
                                     (default)
+    --streaming-output-format FORMAT
+                                    Write downloaded fragments as a progressive
+                                    streaming output (choices: auto, dash, hls;
+                                    default: auto when --streaming-output-path
+                                    is used)
+    --streaming-output-path DIRECTORY
+                                    Directory for --streaming-output-format
+                                    (supports output template fields)
     --wait-for-video MIN[-MAX]      Wait for scheduled streams to become
                                     available. Pass the minimum number of
                                     seconds (or range) to wait between retries
@@ -2282,6 +2290,8 @@ with yt_dlp.YoutubeDL(ydl_opts) as ydl:
 * **Split video by chapters**: Videos can be split into multiple files based on chapters using `--split-chapters`
 
 * **Multi-threaded fragment downloads**: Download multiple fragments of m3u8/mpd videos in parallel. Use `--concurrent-fragments` (`-N`) option to set the number of threads used
+
+* **Progressive streaming output**: Write downloaded fragments directly as a progressive streaming presentation instead of a single merged file, using `--streaming-output-format` (`auto`, `dash`, or `hls`) together with `--streaming-output-path`. This produces a native DASH `.mpd` (with `init-*.mp4`/`*.m4s` or `*.webm` segments) or an HLS `master.m3u8`/`playlist.m3u8` (with `*.ts` segments) that is updated live as fragments arrive, so the capture can be served and played back immediately (e.g. via `python -m http.server`). The `auto` format picks the lightest backend from the first fragment. Requires `--concurrent-fragments 1` and is currently supported for DASH and HLS inputs (YouTube, Twitch, etc.). Example: `yt-dlp --live-from-start --streaming-output-format auto --streaming-output-path "live/%(id)s" -f 298+140 URL`
 
 * **New and fixed extractors**: Many new extractors have been added and a lot of existing ones have been fixed. See the [changelog](Changelog.md) or the [list of supported sites](supportedsites.md)
 
