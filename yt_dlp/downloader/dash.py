@@ -96,6 +96,13 @@ class DashSegmentsFD(FragmentFD):
             return self.download_and_append_fragments_multiple(
                 *args, is_fatal=lambda idx: idx == 0,
                 fragment_callback=(streaming_output.write_fragment if streaming_output else None))
+        except KeyboardInterrupt:
+            # Live fragment downloads may absorb the interrupt before the
+            # caller gets a chance to run post-processors. Finalize here so
+            # a manually stopped capture is published as a static MPD.
+            if streaming_output:
+                streaming_output.finalize()
+            raise
         finally:
             if streaming_output:
                 streaming_output.finalize()

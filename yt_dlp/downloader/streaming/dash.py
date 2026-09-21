@@ -44,6 +44,13 @@ class DashOutput:
                     path.write_bytes(data[:moof])
                     track['init'] = True
                     data = data[moof:]
+            elif track['init'] and container == 'mp4' and not fragment.get('is_init_segment'):
+                # Some live HLS/DASH sources repeat ftyp/moov before each
+                # media fragment. Keep only the moof/mdat media portion after
+                # the initialization segment has already been written.
+                moof = data.find(b'moof')
+                if moof > 4:
+                    data = data[moof - 4:]
             elif not track['init'] and container == 'webm' and not fragment.get('is_init_segment'):
                 # YouTube's WebM DASH fragments may repeat the EBML/Tracks
                 # header in the first fragment. Keep that header as the init
@@ -97,7 +104,17 @@ class DashOutput:
             representation = [f'id="{index}"', f'bandwidth="{int((info.get("tbr") or 1000) * 1000)}"', f'codecs="{escape(codec)}"']
             if not is_audio and info.get('width') and info.get('height'):
                 representation += [f'width="{info["width"]}"', f'height="{info["height"]}"']
-            timeline = ''.join(f'<S t="{round(segment["start"] * 1000)}" d="{round(segment["duration"] * 1000)}" />' for segment in track['segments'])
+            timeline_segments = track['segments']
+            if len(self._tracks) > 1:
+                common_duration = min(
+                    sum(item['duration'] for item in current['segments'])
+                    for current in self._tracks.values() if current['segments'])
+                timeline_segments = [
+                    item for item in timeline_segments
+                    if item['start'] < common_duration]
+            timeline = ''.join(
+                f'<S t="{round(segment["start"] * 1000)}" d="{round(segment["duration"] * 1000)}" />'
+                for segment in timeline_segments)
             init_name = f'init-{index}.{container}'
             media_extension = 'm4s' if container == 'mp4' else 'webm'
             tracks.append(f'''  <AdaptationSet {' '.join(attrs)}>
@@ -109,7 +126,10 @@ class DashOutput:
   </AdaptationSet>''')
         if not tracks:
             return
-        total_duration = max(sum(segment['duration'] for segment in track['segments']) for track in self._tracks.values())
+        track_durations = [
+            sum(segment['duration'] for segment in track['segments'])
+            for track in self._tracks.values() if track['segments']]
+        total_duration = min(track_durations) if len(track_durations) > 1 else track_durations[0]
         mpd_type = 'static' if static else 'dynamic'
         duration = f' mediaPresentationDuration="PT{total_duration:.3f}S"' if static else ''
         text = f'''<?xml version="1.0" encoding="UTF-8"?>
